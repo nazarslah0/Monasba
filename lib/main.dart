@@ -45,7 +45,43 @@ class BookPage {
   final int num;
   final double ratio;
   final List<Act> acts;
-  BookPage(this.id, this.img, this.num, this.ratio, this.acts);
+  final List<Rect> targets;
+  BookPage(this.id, this.img, this.num, this.ratio, this.acts, this.targets);
+}
+
+class Stroke {
+  final int c;
+  final List<Offset> p;
+  Stroke(this.c, this.p);
+}
+
+class InkPainter extends CustomPainter {
+  final List<Stroke> strokes;
+  InkPainter(this.strokes);
+  @override
+  void paint(Canvas canvas, Size s) {
+    for (final st in strokes) {
+      final pt = Paint()
+        ..color = Color(st.c)
+        ..strokeWidth = s.width * 0.008 + 2
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
+      final path = Path();
+      for (var i = 0; i < st.p.length; i++) {
+        final o = Offset(st.p[i].dx * s.width, st.p[i].dy * s.height);
+        if (i == 0) {
+          path.moveTo(o.dx, o.dy);
+        } else {
+          path.lineTo(o.dx, o.dy);
+        }
+      }
+      canvas.drawPath(path, pt);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter old) => true;
 }
 
 class BookScreen extends StatefulWidget {
@@ -66,6 +102,12 @@ class _BookScreenState extends State<BookScreen> with SingleTickerProviderStateM
   int cur = 0, _dir = 0, _token = 0;
   double _acc = 0;
   VoidCallback? _last;
+  bool _draw = false;
+  int _color = 0xFFE53935;
+  Stroke? _live;
+  String? _toast;
+  Map<String, List<Stroke>> _ink = {};
+  Map<String, Set<int>> _solved = {};
 
   @override
   void initState() {
@@ -113,8 +155,25 @@ class _BookScreenState extends State<BookScreen> with SingleTickerProviderStateM
         final d = await ui.ImageDescriptor.encoded(await ui.ImmutableBuffer.fromUint8List(bytes));
         ratio = d.height / d.width;
       }
-      pages.add(BookPage(p['id'].toString(), p['img'].toString(), p['num'] as int, ratio, acts));
+      final tg = <Rect>[
+        for (final t in (p['targets'] as List? ?? []))
+          Rect.fromLTWH((t['x'] as num).toDouble(), (t['y'] as num).toDouble(), (t['w'] as num).toDouble(), (t['h'] as num).toDouble())
+      ];
+      pages.add(BookPage(p['id'].toString(), p['img'].toString(), p['num'] as int, ratio, acts, tg));
     }
+    try {
+      (jsonDecode(_prefs.getString('ink') ?? '{}') as Map).forEach((k, v) {
+        _ink[k.toString()] = [
+          for (final st in v as List)
+            Stroke(st['c'] as int, [
+              for (var i = 0; i + 1 < (st['p'] as List).length; i += 2) Offset((st['p'][i] as num).toDouble(), (st['p'][i + 1] as num).toDouble())
+            ])
+        ];
+      });
+      (jsonDecode(_prefs.getString('solved') ?? '{}') as Map).forEach((k, v) {
+        _solved[k.toString()] = {for (final i in v as List) i as int};
+      });
+    } catch (e) {}
     cur = (_prefs.getInt('lastPage') ?? 0).clamp(0, pages.length - 1);
     setState(() => _ready = true);
   }
@@ -186,6 +245,85 @@ class _BookScreenState extends State<BookScreen> with SingleTickerProviderStateM
       await _play(it, my);
       await Future.delayed(const Duration(milliseconds: 250));
     }
+  }
+
+  // ---------- drawing & checking ----------
+  void _msg(String t) {
+    setState(() => _toast = t);
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      if (mounted && _toast == t) setState(() => _toast = null);
+    });
+  }
+
+  Future<void> _saveInk() async {
+    final m = {
+      for (final e in _ink.entries)
+        e.key: [
+          for (final st in e.value)
+            {
+              'c': st.c,
+              'p': [for (final o in st.p) ...[double.parse(o.dx.toStringAsFixed(3)), double.parse(o.dy.toStringAsFixed(3))]]
+            }
+        ]
+    };
+    await _prefs.setString('ink', jsonEncode(m));
+    await _prefs.setString('solved', jsonEncode({for (final e in _solved.entries) e.key: e.value.toList()}));
+  }
+
+  void _ps(Offset o, double w, double h) => setState(() => _live = Stroke(_color, [Offset(o.dx / w, o.dy / h)]));
+  void _pu(Offset o, double w, double h) {
+    _live?.p.add(Offset((o.dx / w).clamp(0.0, 1.0), (o.dy / h).clamp(0.0, 1.0)));
+    setState(() {});
+  }
+
+  void _pe(BookPage p) {
+    final s = _live;
+    _live = null;
+    if (s == null) return;
+    var keep = true;
+    if (p.targets.isNotEmpty && s.p.length > 8) {
+      final xs = s.p.map((o) => o.dx * 100), ys = s.p.map((o) => o.dy * 100);
+      final bb = Rect.fromLTRB(xs.reduce(math.min), ys.reduce(math.min), xs.reduce(math.max), ys.reduce(math.max));
+      final gap = (Offset(s.p.first.dx * 100, s.p.first.dy * 100) - Offset(s.p.last.dx * 100, s.p.last.dy * 100)).distance;
+      final closed = bb.width > 3 && bb.height > 3 && gap < 0.35 * math.max(bb.width, bb.height);
+      if (closed) {
+        var hit = -1;
+        for (var i = 0; i < p.targets.length; i++) {
+          final t = p.targets[i], it = bb.intersect(t);
+          if (it.width > 0 && it.height > 0 && it.width * it.height / (t.width * t.height) > 0.7 && bb.width * bb.height <= t.width * t.height * 8) {
+            hit = i;
+            break;
+          }
+        }
+        if (hit >= 0) {
+          final done = (_solved[p.id] ??= {})..add(hit);
+          final all = done.length >= p.targets.length;
+          _msg(all ? '🎉 أحسنت! أكملت النشاط' : '⭐ أحسنت!');
+          _tts.speak('أحسنت');
+        } else {
+          keep = false;
+          _msg('❌ حاول مرة أخرى');
+          _tts.speak('حاول مرة أخرى');
+        }
+      }
+    }
+    if (keep) (_ink[p.id] ??= []).add(s);
+    setState(() {});
+    _saveInk();
+  }
+
+  void _undo() {
+    final l = _ink[pages[cur].id];
+    if (l != null && l.isNotEmpty) setState(() => l.removeLast());
+    _saveInk();
+  }
+
+  void _clear() {
+    setState(() {
+      _ink.remove(pages[cur].id);
+      _solved.remove(pages[cur].id);
+    });
+    _saveInk();
   }
 
   // ---------- page turning ----------
@@ -285,6 +423,19 @@ class _BookScreenState extends State<BookScreen> with SingleTickerProviderStateM
                         ),
                       ),
                     ),
+                  Positioned.fill(
+                      child: IgnorePointer(
+                          child: CustomPaint(painter: InkPainter([...(_ink[p.id] ?? []), if (live && _live != null) _live!])))),
+                  if (live && _draw)
+                    Positioned.fill(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onPanStart: (d) => _ps(d.localPosition, w, h),
+                        onPanUpdate: (d) => _pu(d.localPosition, w, h),
+                        onPanEnd: (_) => _pe(p),
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
                 ]),
               ),
             );
@@ -323,6 +474,24 @@ class _BookScreenState extends State<BookScreen> with SingleTickerProviderStateM
             decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(99)),
             child: Text('صفحة ${pages[cur].num} من ${pages.length}', style: const TextStyle(fontWeight: FontWeight.bold)),
           ),
+          if (_draw)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                for (final c in [0xFFE53935, 0xFF1E88E5, 0xFF43A047, 0xFF212121])
+                  GestureDetector(
+                    onTap: () => setState(() => _color = c),
+                    child: Container(
+                      width: 38,
+                      height: 38,
+                      margin: const EdgeInsets.symmetric(horizontal: 6),
+                      decoration: BoxDecoration(color: Color(c), shape: BoxShape.circle, border: Border.all(color: _color == c ? Colors.amber : Colors.white, width: 4)),
+                    ),
+                  ),
+                _btn('↩️', 'تراجع', _undo),
+                _btn('🗑️', 'مسح', _clear),
+              ]),
+            ),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(children: [
@@ -337,6 +506,10 @@ class _BookScreenState extends State<BookScreen> with SingleTickerProviderStateM
                 _stop();
                 setState(() => _word = !_word);
               }, _word),
+              _btn('✏️', 'رسم', () {
+                _stop();
+                setState(() => _draw = !_draw);
+              }, _draw),
             ]),
           ),
           const SizedBox(height: 6),
@@ -353,11 +526,21 @@ class _BookScreenState extends State<BookScreen> with SingleTickerProviderStateM
         return Stack(children: [
           Positioned.fill(
             child: GestureDetector(
-              onHorizontalDragUpdate: (d) => _du(d, w),
-              onHorizontalDragEnd: (_) => _de(),
+              onHorizontalDragUpdate: _draw ? null : (d) => _du(d, w),
+              onHorizontalDragEnd: _draw ? null : (_) => _de(),
               child: AnimatedBuilder(animation: _ctrl, builder: (_, __) => _book()),
             ),
           ),
+          if (_toast != null)
+            Center(
+              child: IgnorePointer(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(26), border: Border.all(color: const Color(0xFFFFD23F), width: 5)),
+                  child: Text(_toast!, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: Color(0xFF5A2BC0))),
+                ),
+              ),
+            ),
           Positioned(
             left: 0,
             right: 0,
