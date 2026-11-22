@@ -1,10 +1,14 @@
-name: Build APK
+name: Build APK and Web
 on:
   push:
     branches: [main, master]
   workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 jobs:
-  apk:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,10 +20,10 @@ jobs:
         with:
           channel: stable
           cache: true
-      - name: Generate android project (keeps our lib/pubspec/assets)
+      - name: Generate android + web projects (keeps our lib/pubspec/assets)
         run: |
           mkdir /tmp/keep && cp -r lib pubspec.yaml /tmp/keep/
-          flutter create --platforms=android --project-name qiraati --org com.qiraati .
+          flutter create --platforms=android,web --project-name qiraati --org com.qiraati .
           rm -rf lib pubspec.yaml && cp -r /tmp/keep/lib /tmp/keep/pubspec.yaml .
       - name: Allow text-to-speech on Android 11+
         run: |
@@ -28,7 +32,24 @@ jobs:
           grep -n "TTS_SERVICE" $M
       - run: flutter pub get
       - run: flutter build apk --release
+      - run: flutter build web --release --base-href "/${{ github.event.repository.name }}/"
       - uses: actions/upload-artifact@v4
         with:
           name: qiraati-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qiraati-web
+          path: build/web
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.dep.outputs.page_url }}
+    steps:
+      - id: dep
+        uses: actions/deploy-pages@v4
