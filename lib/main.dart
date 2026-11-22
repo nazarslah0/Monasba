@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -28,7 +30,8 @@ class Item {
   final double x, y, w, h;
   final bool draft;
   final String key;
-  Item(this.text, this.x, this.y, this.w, this.h, this.draft, this.key);
+  final String? audio;
+  Item(this.text, this.x, this.y, this.w, this.h, this.draft, this.key, this.audio);
 }
 
 class Act {
@@ -53,6 +56,8 @@ class BookScreen extends StatefulWidget {
 
 class _BookScreenState extends State<BookScreen> with SingleTickerProviderStateMixin {
   final _tts = FlutterTts();
+  final _ap = AudioPlayer();
+  Map<String, String> _aud = {};
   late final AnimationController _ctrl;
   final _playing = ValueNotifier<Item?>(null);
   late SharedPreferences _prefs;
@@ -75,12 +80,14 @@ class _BookScreenState extends State<BookScreen> with SingleTickerProviderStateM
   void dispose() {
     _ctrl.dispose();
     _tts.stop();
+    _ap.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
     final j = jsonDecode(await rootBundle.loadString('assets/content.json'));
     final b = (j['book'] ?? j) as Map;
+    _aud = ((j['audio'] ?? {}) as Map).map((k, v) => MapEntry(k.toString(), v.toString()));
     _prefs = await SharedPreferences.getInstance();
     for (final p in b['pages']) {
       final acts = <Act>[];
@@ -94,11 +101,19 @@ class _BookScreenState extends State<BookScreen> with SingleTickerProviderStateM
           final m = il[ii];
           final k = '${p['id']}|$ai|$ii';
           its.add(Item((m['text'] ?? '').toString(), (m['x'] as num).toDouble(), (m['y'] as num).toDouble(),
-              (m['w'] as num).toDouble(), (m['h'] as num).toDouble(), m['draft'] == true, k));
+              (m['w'] as num).toDouble(), (m['h'] as num).toDouble(), m['draft'] == true, k, m['audio']?.toString()));
         }
         acts.add(Act((a['layer'] ?? 'both').toString(), its));
       }
-      pages.add(BookPage(p['id'].toString(), p['img'].toString(), p['num'] as int, (p['ratio'] ?? 1.414).toDouble(), acts));
+      double ratio;
+      if (p['ratio'] != null) {
+        ratio = (p['ratio'] as num).toDouble();
+      } else {
+        final bytes = (await rootBundle.load('assets/pages/${p['img']}.jpg')).buffer.asUint8List();
+        final d = await ui.ImageDescriptor.encoded(await ui.ImmutableBuffer.fromUint8List(bytes));
+        ratio = d.height / d.width;
+      }
+      pages.add(BookPage(p['id'].toString(), p['img'].toString(), p['num'] as int, ratio, acts));
     }
     cur = (_prefs.getInt('lastPage') ?? 0).clamp(0, pages.length - 1);
     setState(() => _ready = true);
@@ -111,6 +126,7 @@ class _BookScreenState extends State<BookScreen> with SingleTickerProviderStateM
   void _stop() {
     _token++;
     _tts.stop();
+    _ap.stop();
     _playing.value = null;
   }
 
@@ -120,8 +136,29 @@ class _BookScreenState extends State<BookScreen> with SingleTickerProviderStateM
     await _tts.speak(t);
   }
 
+  Future<bool> _playAudio(Item it) async {
+    final k = it.audio;
+    if (k == null || k.isEmpty) return false;
+    try {
+      final d = _aud[k];
+      final Source src = d != null ? BytesSource(base64Decode(d.substring(d.indexOf(',') + 1))) : AssetSource('audio/$k.mp3');
+      await _ap.stop();
+      final done = _ap.onPlayerComplete.first.timeout(const Duration(seconds: 30), onTimeout: () {});
+      await _ap.play(src);
+      await done;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   Future<void> _play(Item it, int my) async {
     _playing.value = it;
+    if (await _playAudio(it)) {
+      if (my == _token) _playing.value = null;
+      return;
+    }
+    if (my != _token) return;
     final t = it.draft ? it.text.replaceAll(RegExp(r'[\u064B-\u065F\u0670\u0640]'), '') : it.text;
     if (_spell) {
       for (final m in RegExp(r'[\u0621-\u064A][\u064B-\u065F\u0670\u0640]*').allMatches(it.text)) {
