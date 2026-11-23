@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -126,7 +125,24 @@ class _BookScreenState extends State<BookScreen> with SingleTickerProviderStateM
     super.dispose();
   }
 
+  String? _err;
+
   Future<void> _load() async {
+    try {
+      await _load0();
+    } catch (e) {
+      if (mounted) setState(() => _err = '$e');
+    }
+  }
+
+  Future<void> _load0() async {
+    Map<String, dynamic> ratios = {}, tgs = {};
+    try {
+      ratios = jsonDecode(await rootBundle.loadString('assets/ratios.json')) as Map<String, dynamic>;
+    } catch (e) {}
+    try {
+      tgs = jsonDecode(await rootBundle.loadString('assets/targets.json')) as Map<String, dynamic>;
+    } catch (e) {}
     final j = jsonDecode(await rootBundle.loadString('assets/content.json'));
     final b = (j['book'] ?? j) as Map;
     _aud = ((j['audio'] ?? {}) as Map).map((k, v) => MapEntry(k.toString(), v.toString()));
@@ -147,16 +163,9 @@ class _BookScreenState extends State<BookScreen> with SingleTickerProviderStateM
         }
         acts.add(Act((a['layer'] ?? 'both').toString(), its));
       }
-      double ratio;
-      if (p['ratio'] != null) {
-        ratio = (p['ratio'] as num).toDouble();
-      } else {
-        final bytes = (await rootBundle.load('assets/pages/${p['img']}.jpg')).buffer.asUint8List();
-        final d = await ui.ImageDescriptor.encoded(await ui.ImmutableBuffer.fromUint8List(bytes));
-        ratio = d.height / d.width;
-      }
+      final double ratio = ((p['ratio'] ?? ratios[p['img']] ?? 1.4128) as num).toDouble();
       final tg = <Rect>[
-        for (final t in (p['targets'] as List? ?? []))
+        for (final t in ((p['targets'] ?? tgs[p['id']]) as List? ?? []))
           Rect.fromLTWH((t['x'] as num).toDouble(), (t['y'] as num).toDouble(), (t['w'] as num).toDouble(), (t['h'] as num).toDouble())
       ];
       pages.add(BookPage(p['id'].toString(), p['img'].toString(), p['num'] as int, ratio, acts, tg));
@@ -518,6 +527,9 @@ class _BookScreenState extends State<BookScreen> with SingleTickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
+    if (_err != null) {
+      return Scaffold(body: Center(child: Padding(padding: const EdgeInsets.all(24), child: SelectableText('خطأ في تحميل المحتوى:\n$_err', style: const TextStyle(fontSize: 18)))));
+    }
     if (!_ready) return const Scaffold(body: Center(child: CircularProgressIndicator()));
     return Scaffold(
       backgroundColor: const Color(0xFF3B2A1A),
