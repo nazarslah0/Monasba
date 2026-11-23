@@ -14,5 +14,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/content.json
+    - assets/ratios.json
+    - assets/targets.json
     - assets/pages/
     - assets/audio/
