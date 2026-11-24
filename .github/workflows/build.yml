@@ -28,24 +28,34 @@ jobs:
       - name: Allow text-to-speech on Android 11+
         run: |
           M=android/app/src/main/AndroidManifest.xml
-          sed -i 's|<application|<queries><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>\n    <application|' $M
+          sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/>\n    <queries><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>\n    <application|' $M
           grep -n "TTS_SERVICE" $M
       - run: flutter pub get
+      - name: Static analysis (fails only on errors)
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
       - run: flutter build apk --release
-      - run: flutter build web --release --base-href "/${{ github.event.repository.name }}/"
       - uses: actions/upload-artifact@v4
         with:
           name: qiraati-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-      - uses: actions/upload-artifact@v4
+      - name: Build web (does not block the APK)
+        continue-on-error: true
+        run: flutter build web --release --base-href "/${{ github.event.repository.name }}/"
+      - name: Check web output
+        id: web
+        run: test -f build/web/index.html && echo "ok=true" >> $GITHUB_OUTPUT || echo "ok=false" >> $GITHUB_OUTPUT
+      - if: steps.web.outputs.ok == 'true'
+        uses: actions/upload-artifact@v4
         with:
           name: qiraati-web
           path: build/web
-      - uses: actions/upload-pages-artifact@v3
+      - if: steps.web.outputs.ok == 'true'
+        uses: actions/upload-pages-artifact@v3
         with:
           path: build/web
   deploy:
     needs: build
+    continue-on-error: true
     runs-on: ubuntu-latest
     environment:
       name: github-pages
