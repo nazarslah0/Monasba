@@ -1,26 +1,32 @@
 # قراءتي (Flutter)
 
-## بناء APK والويب بدون تثبيت Flutter (GitHub Actions)
-1) أنشئ مستودعًا جديدًا على github.com وارفع كل محتويات هذا المجلد (بما فيها المجلد المخفي .github).
-2) افتح تبويب Actions ← Build APK ← Run workflow (أو يبدأ تلقائيًا عند الرفع على main).
-3) بعد النجاح (بضع دقائق) افتح التشغيل وحمّل qiraati-apk من Artifacts وثبّت app-release.apk على الهاتف.
-4) نسخة الويب: مرة واحدة فقط من Settings ← Pages اجعل Source = GitHub Actions، ثم أعد التشغيل، فيظهر رابط الموقع في خطوة deploy (https://اسمك.github.io/اسم-المستودع/). كما تجد ملفاتها في Artifacts باسم qiraati-web لرفعها على أي استضافة (ابنِها بنفسك مع --base-href المناسب إن لم تستخدم GitHub Pages).
+## البناء بدون تثبيت Flutter (GitHub Actions)
+1) أنشئ مستودعًا على github.com وارفع كل محتويات هذا المجلد (مع المجلد المخفي .github).
+2) Actions ← Build APK and Web ← Run workflow.
+3) حمّل qiraati-apk من Artifacts وثبّت app-release.apk. الويب: Settings ← Pages ← Source = GitHub Actions.
+الـ workflow يفحص الكود (flutter analyze) قبل البناء، فإن وُجد خطأ ستظهر رسالته في سجل التشغيل.
 
-## التشغيل المحلي
-flutter create --platforms=android . ثم أضف داخل <manifest> في android/app/src/main/AndroidManifest.xml:
-<queries><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>
-ثم flutter pub get و flutter run.
+## هيكل الكود (lib/)
+- config.dart: رابط السحابة (kCloudBase) وعدد الصفحات المحمّلة مسبقًا (kPrefetch) والرقم السري (kAdminPin).
+- models.dart: بنية الكتاب. store.dart: تحميل المحتوى والتحديث. audio_service.dart: الصوت والتحميل المسبق.
+- reader.dart: شاشة القراءة (قلب الصفحات، 🎧، الرسم، التحقق). main.dart: نقطة البداية.
 
-## تعديل البيانات
-من المطوّر فقط: عدّل assets/content.json (أو صدّره من dashboard.html وضعه مكانه). لا يوجد تعديل داخل التطبيق.
+## الأزرار
+🎧 اقرأ الصفحة كاملة | 🎧 الصغيرة الدائرية عند كل نشاط تقرأ النشاط/النشيد كاملًا | الضغط على كلمة يقرؤها | 🐢 بطيء | ✏️ رسم | ☰ المزيد (تهجئة، كلمات مفردة، اذهب إلى صفحة).
+الضغط على الصفحة يخفي/يُظهر الأزرار.
 
-## الأصوات
-- كل عنصر في content.json يقبل الحقل "audio". إن كان اسم ملف داخل assets/audio (بدون .mp3) مثل "04_tha_kasra" يُشغَّل الملف.
-- أو أضف الصوت للعنصر من dashboard.html (🎵 إضافة صوت أو الاستوديو) ثم صدّر content.json: الأصوات تُدمج فيه وتعمل مباشرة.
-- إن لم يوجد صوت للعنصر يعود التطبيق إلى النطق الآلي.
+## الصوت (بالترتيب)
+تسجيل مدمج ← ملف محفوظ من السحابة ← رابط السحابة ← النطق الآلي. الحقل "audio" في العنصر هو اسم الملف بدون .mp3.
+مقاطع الحروف الـ84 مدمجة في assets/audio.
 
-## الرسم والتحقق (✏️)
-- زر ✏️ في كل صفحة يفتح الرسم بالإصبع (ألوان، تراجع، مسح) ويُحفظ رسم الطفل لكل صفحة.
-- للأنشطة التي لها إجابة (مثل: ارسم دائرة حول المختلف) أضف للصفحة في content.json الحقل "targets": [{"x":..,"y":..,"w":..,"h":..}] بالنسب المئوية من الصفحة (مثال جاهز في الصفحة 8). دائرة الطفل حول الهدف = ⭐ أحسنت، وحول مكان خاطئ = ❌ حاول مرة أخرى وتُمسح.
+## السحابة (تحديث بلا إعادة بناء)
+1) أنشئ مستودعًا ثانيًا (مثل qiraati-content) وفعّل GitHub Pages له.
+2) في dashboard.html اضغط «☁️ ملفات السحابة» ← نزّل cloud-files.zip ← فكّه وارفع manifest.json وcontent.json ومجلد audio إلى المستودع.
+3) ضع رابطه في config.dart: kCloudBase = 'https://USERNAME.github.io/qiraati-content' وأعد البناء مرة واحدة.
+بعدها كل «ملفات سحابة» جديدة تُحدّث التطبيق عند فتحه، والصفحات القادمة (الحالية + 5) تُحمَّل صوتها تلقائيًا وتُحفظ على الجهاز.
 
-ملاحظة: أهداف التحقق (targets) صارت في assets/targets.json (مفتاحها معرّف الصفحة مثل p8) حتى لا تضيع عند استبدال content.json بملف مصدّر من اللوحة. وassets/ratios.json لنسب الصور.
+## القائمة المخفية (للمطوّر فقط)
+اضغط مطولًا على نص «صفحة N من M» ← الرقم السري ← استيراد content.json من الجهاز، أو تحديث من السحابة، أو العودة للمحتوى المدمج.
+
+## البيانات الثابتة
+assets/content.json (الكتاب) | assets/targets.json (أهداف التحقق، مثل p8) | assets/ratios.json (نسب الصور).
