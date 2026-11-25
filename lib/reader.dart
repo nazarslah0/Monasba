@@ -60,7 +60,10 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
       setState(() => _ready = true);
       _prefetch();
       final n = await Store.checkCloud(_prefs);
-      if (n != null && mounted) _setBook(n);
+      if (n != null && mounted) {
+        _setBook(n);
+        _msg('✅ تم تحديث المحتوى');
+      }
     } catch (e) {
       if (mounted) setState(() => _err = '$e');
     }
@@ -533,8 +536,15 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
               if (d != null) {
                 _setBook(d);
                 _msg('✅ تم التحديث');
-              } else {
-                _msg('لا يوجد تحديث أو لا اتصال');
+              } else if (mounted) {
+                showDialog(
+                  context: context,
+                  builder: (c) => AlertDialog(
+                    title: const Text('نتيجة الفحص'),
+                    content: SelectableText(Store.lastCloudNote.isEmpty ? 'لا يوجد تحديث أو لا اتصال' : Store.lastCloudNote),
+                    actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('حسنًا'))],
+                  ),
+                );
               }
             },
           ),
@@ -562,6 +572,7 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
       final d = await Store.parse(txt);
       await _prefs.setString('contentOverride', txt);
       await _prefs.setBool('pinned', true);
+      await _prefs.setInt('pinnedAt', DateTime.now().millisecondsSinceEpoch);
       _setBook(d);
       _msg('✅ تم الاستيراد');
     } catch (_) {
