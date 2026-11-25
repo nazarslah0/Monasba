@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:file_picker/file_picker.dart';
@@ -18,11 +19,14 @@ class ReaderScreen extends StatefulWidget {
   State<ReaderScreen> createState() => _ReaderState();
 }
 
-class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMixin {
+class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final _audio = AudioService();
   late final AnimationController _ctrl;
   late SharedPreferences _prefs;
   final _playing = ValueNotifier<Item?>(null);
+  Timer? _poll;
+  bool _checking = false;
+  DateTime _lastCheck = DateTime.fromMillisecondsSinceEpoch(0);
 
   List<BookPage> pages = [];
   bool _ready = false, _ui = true, _slow = false, _spell = false, _word = false, _draw = false;
@@ -38,11 +42,37 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
   void initState() {
     super.initState();
     _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 300));
+    WidgetsBinding.instance.addObserver(this);
+    _poll = Timer.periodic(const Duration(minutes: 3), (_) => _autoCheck());
     _init();
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _autoCheck();
+  }
+
+  /// فحص السحابة تلقائيًا: عند الفتح، وعند الرجوع للتطبيق، وكل 3 دقائق أثناء استخدامه.
+  Future<void> _autoCheck() async {
+    if (_checking || !_ready) return;
+    if (DateTime.now().difference(_lastCheck).inSeconds < 20) return;
+    _checking = true;
+    _lastCheck = DateTime.now();
+    try {
+      final n = await Store.checkCloud(_prefs);
+      if (n != null && mounted) {
+        _setBook(n);
+        _msg('✅ تم تحديث المحتوى');
+      }
+    } finally {
+      _checking = false;
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _poll?.cancel();
     _ctrl.dispose();
     _audio.dispose();
     super.dispose();
@@ -59,11 +89,7 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
       cur = (_prefs.getInt('lastPage') ?? 0).clamp(0, pages.length - 1);
       setState(() => _ready = true);
       _prefetch();
-      final n = await Store.checkCloud(_prefs);
-      if (n != null && mounted) {
-        _setBook(n);
-        _msg('✅ تم تحديث المحتوى');
-      }
+      _autoCheck();
     } catch (e) {
       if (mounted) setState(() => _err = '$e');
     }

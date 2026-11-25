@@ -79,8 +79,16 @@ class AudioService {
         if (f != null && await f.exists()) {
           src = DeviceFileSource(f.path);
         } else if (kCloudBase.isNotEmpty) {
-          src = UrlSource('$kCloudBase/audio/$k.mp3');
-          _enqueue(k);
+          if (f != null) {
+            // ننزّل الملف كاملًا قبل التشغيل (أضمن من البث)، وننتظر إن كان قيد التنزيل مسبقًا.
+            await _download(k);
+            for (var i = 0; i < 100 && _busy.contains(k); i++) {
+              await Future.delayed(const Duration(milliseconds: 200));
+            }
+            if (await f.exists()) src = DeviceFileSource(f.path);
+          } else {
+            src = UrlSource('$kCloudBase/audio/$k.mp3');
+          }
         }
       }
       if (src == null) return false;
