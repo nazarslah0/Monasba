@@ -116,7 +116,7 @@ class AudioService {
         return false;
       }
       await _ap.stop();
-      final done = _ap.onPlayerComplete.first.timeout(const Duration(seconds: 40), onTimeout: () {});
+      final done = _ap.onPlayerComplete.first.then((_) {}).timeout(const Duration(seconds: 40), onTimeout: () {});
       await _ap.play(src);
       await done;
       return true;
