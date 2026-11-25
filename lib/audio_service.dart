@@ -22,6 +22,10 @@ class AudioService {
   final _busy = <String>{};
   int _active = 0;
 
+  /// آخر سبب لفشل تشغيل تسجيل (يُعرض على الشاشة للتشخيص).
+  String? lastError;
+  String _dlNote = '';
+
   Future<void> init() async {
     _tts.setLanguage('ar-SA');
     _tts.awaitSpeakCompletion(true);
@@ -60,6 +64,7 @@ class AudioService {
 
   Future<void> speak(Item it, {bool slow = false, bool spell = false}) async {
     final g = _gen;
+    lastError = null;
     if (await _playRecorded(it.audio)) return;
     if (g != _gen) return;
     await _tts.setSpeechRate(slow ? 0.3 : 0.5);
@@ -106,13 +111,17 @@ class AudioService {
           }
         }
       }
-      if (src == null) return false;
+      if (src == null) {
+        lastError = 'لم يُنزَّل الصوت $k.mp3 $_dlNote';
+        return false;
+      }
       await _ap.stop();
       final done = _ap.onPlayerComplete.first.timeout(const Duration(seconds: 40), onTimeout: () {});
       await _ap.play(src);
       await done;
       return true;
-    } catch (_) {
+    } catch (e) {
+      lastError = 'تعذّر تشغيل $k: $e';
       return false;
     }
   }
@@ -148,8 +157,14 @@ class AudioService {
       final f = await _file(k);
       if (f == null || await f.exists()) return;
       final r = await http.get(Uri.parse(_url(k))).timeout(const Duration(seconds: 30));
-      if (r.statusCode == 200 && r.bodyBytes.isNotEmpty) await f.writeAsBytes(r.bodyBytes, flush: true);
-    } catch (_) {
+      if (r.statusCode == 200 && r.bodyBytes.length > 500) {
+        await f.writeAsBytes(r.bodyBytes, flush: true);
+        _dlNote = '';
+      } else {
+        _dlNote = '(رمز ${r.statusCode}، ${r.bodyBytes.length} بايت من ${kCloudBase}/audio/$k.mp3)';
+      }
+    } catch (e) {
+      _dlNote = '(فشل الاتصال: $e)';
     } finally {
       _busy.remove(k);
     }

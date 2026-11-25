@@ -151,6 +151,7 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
       _playing.value = it;
       await _audio.speak(it, slow: _slow, spell: _spell);
       if (my != _token) return;
+      if (_audio.lastError != null) _msg('⚠️ ${_audio.lastError}');
       await Future.delayed(const Duration(milliseconds: 250));
     }
     if (my == _token) _playing.value = null;
@@ -180,7 +181,7 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
 
   void _msg(String t) {
     setState(() => _toast = t);
-    Future.delayed(const Duration(milliseconds: 1500), () {
+    Future.delayed(Duration(milliseconds: 1500 + t.length * 40), () {
       if (mounted && _toast == t) setState(() => _toast = null);
     });
   }
