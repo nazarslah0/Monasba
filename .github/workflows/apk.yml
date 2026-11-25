@@ -31,6 +31,7 @@ jobs:
           mkdir /tmp/keep && cp -r lib pubspec.yaml /tmp/keep/
           flutter create --platforms=android --project-name qiraati --org com.qiraati .
           rm -rf lib pubspec.yaml && cp -r /tmp/keep/lib /tmp/keep/pubspec.yaml .
+          rm -rf test analysis_options.yaml
 
       - name: Allow internet and text-to-speech
         run: |

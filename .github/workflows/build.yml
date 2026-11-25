@@ -25,6 +25,7 @@ jobs:
           mkdir /tmp/keep && cp -r lib pubspec.yaml /tmp/keep/
           flutter create --platforms=android,web --project-name qiraati --org com.qiraati .
           rm -rf lib pubspec.yaml && cp -r /tmp/keep/lib /tmp/keep/pubspec.yaml .
+          rm -rf test analysis_options.yaml
       - name: Allow text-to-speech on Android 11+
         run: |
           M=android/app/src/main/AndroidManifest.xml
