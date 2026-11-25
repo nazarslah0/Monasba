@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'audio_service.dart';
@@ -547,14 +546,6 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(
-            leading: const Text('📥', style: TextStyle(fontSize: 22)),
-            title: const Text('استيراد content.json من الجهاز'),
-            onTap: () {
-              Navigator.pop(ctx);
-              _import();
-            },
-          ),
-          ListTile(
             leading: const Text('☁️', style: TextStyle(fontSize: 22)),
             title: const Text('تحديث من السحابة الآن'),
             onTap: () async {
@@ -589,23 +580,6 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
         ]),
       ),
     );
-  }
-
-  Future<void> _import() async {
-    final r = await FilePicker.platform.pickFiles(type: FileType.any, withData: true);
-    final bytes = r?.files.single.bytes;
-    if (bytes == null) return;
-    try {
-      final txt = utf8.decode(bytes);
-      final d = await Store.parse(txt);
-      await _prefs.setString('contentOverride', txt);
-      await _prefs.setBool('pinned', true);
-      await _prefs.setInt('pinnedAt', DateTime.now().millisecondsSinceEpoch);
-      _setBook(d);
-      _msg('✅ تم الاستيراد');
-    } catch (_) {
-      _msg('❌ الملف غير صالح');
-    }
   }
 
   @override
