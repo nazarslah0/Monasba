@@ -31,10 +31,26 @@ jobs:
           M=android/app/src/main/AndroidManifest.xml
           sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/>\n    <queries><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>\n    <application|' $M
           grep -n "TTS_SERVICE" $M
+      - name: Cache Gradle (fewer downloads, avoids rate limits)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('pubspec.yaml') }}
+          restore-keys: gradle-
+
       - run: flutter pub get
       - name: Static analysis (fails only on errors)
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
-      - run: flutter build apk --release
+      - name: Build APK (retries on network errors)
+        run: |
+          for i in 1 2 3 4; do
+            flutter build apk --release && exit 0
+            echo "Attempt $i failed (network?), waiting before retry..."
+            sleep $((i*60))
+          done
+          exit 1
       - uses: actions/upload-artifact@v4
         with:
           name: qiraati-apk

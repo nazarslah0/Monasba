@@ -45,13 +45,28 @@ jobs:
           mkdir -p ~/.android
           cp debug.keystore ~/.android/debug.keystore
 
+      - name: Cache Gradle (fewer downloads, avoids rate limits)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('pubspec.yaml') }}
+          restore-keys: gradle-
+
       - run: flutter pub get
 
       - name: Static analysis
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
-      - name: Build APK
-        run: flutter build apk --release --build-number=${{ github.run_number }}
+      - name: Build APK (retries on network errors)
+        run: |
+          for i in 1 2 3 4; do
+            flutter build apk --release --build-number=${{ github.run_number }} && exit 0
+            echo "Attempt $i failed (network?), waiting before retry..."
+            sleep $((i*60))
+          done
+          exit 1
 
       - name: Publish release
         env:
