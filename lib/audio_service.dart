@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'config.dart';
 import 'models.dart';
+import 'store.dart';
 
 /// الصوت: تسجيل مدمج ← ملف محفوظ من السحابة ← رابط السحابة ← النطق الآلي.
 class AudioService {
@@ -31,6 +32,20 @@ class AudioService {
   }
 
   void setEmbedded(Map<String, String> m) => _embedded = m;
+
+  String _url(String k) => '$kCloudBase/audio/$k.mp3?v=${Store.version}';
+
+  /// يمسح الأصوات المحفوظة على الجهاز (تُنزَّل من جديد عند الحاجة) بعد أي تحديث للمحتوى.
+  Future<void> clearCache() async {
+    _q.clear();
+    if (kIsWeb) return;
+    try {
+      await _file('_');
+      for (final e in _dir!.listSync()) {
+        if (e is File) e.deleteSync();
+      }
+    } catch (_) {}
+  }
 
   Future<void> stop() async {
     _gen++;
@@ -87,7 +102,7 @@ class AudioService {
             }
             if (await f.exists()) src = DeviceFileSource(f.path);
           } else {
-            src = UrlSource('$kCloudBase/audio/$k.mp3');
+            src = UrlSource(_url(k));
           }
         }
       }
@@ -132,7 +147,7 @@ class AudioService {
     try {
       final f = await _file(k);
       if (f == null || await f.exists()) return;
-      final r = await http.get(Uri.parse('$kCloudBase/audio/$k.mp3')).timeout(const Duration(seconds: 30));
+      final r = await http.get(Uri.parse(_url(k))).timeout(const Duration(seconds: 30));
       if (r.statusCode == 200 && r.bodyBytes.isNotEmpty) await f.writeAsBytes(r.bodyBytes, flush: true);
     } catch (_) {
     } finally {

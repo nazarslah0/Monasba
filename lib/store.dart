@@ -29,6 +29,9 @@ class Store {
   /// آخر ملاحظة/سبب من فحص السحابة (للتشخيص في القائمة المخفية).
   static String lastCloudNote = '';
 
+  /// إصدار محتوى السحابة الحالي؛ يُضاف لروابط الصوت لمنع استخدام نسخة قديمة مخزّنة.
+  static String version = '';
+
   /// بصمة بسيطة ثابتة للمحتوى المدمج لاكتشاف أنه تغيّر في نسخة جديدة من التطبيق.
   static String _sig(String s) {
     var h = 0x811C9DC5;
@@ -54,6 +57,7 @@ class Store {
       }
       await p.setString('bundledSig', sig);
     }
+    version = p.getString('cloudVersion') ?? '';
     final o = p.getString('contentOverride');
     if (o != null) {
       try {
@@ -106,6 +110,7 @@ class Store {
       final ok = await p.setString('contentOverride', txt);
       if (!ok) throw Exception('تعذّر حفظ المحتوى على الجهاز');
       await p.setString('cloudVersion', v);
+      version = v;
       await p.remove('pinned');
       await p.remove('pinnedAt');
       lastCloudNote = 'تم التحديث من السحابة (إصدار $v).';

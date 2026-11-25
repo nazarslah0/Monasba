@@ -61,6 +61,7 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
     try {
       final n = await Store.checkCloud(_prefs);
       if (n != null && mounted) {
+        await _audio.clearCache();
         _setBook(n);
         _msg('✅ تم تحديث المحتوى');
       }
@@ -560,6 +561,7 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
               Navigator.pop(ctx);
               final d = await Store.checkCloud(_prefs, force: true);
               if (d != null) {
+                await _audio.clearCache();
                 _setBook(d);
                 _msg('✅ تم التحديث');
               } else if (mounted) {
