@@ -23,9 +23,6 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
   late final AnimationController _ctrl;
   late SharedPreferences _prefs;
   final _playing = ValueNotifier<Item?>(null);
-  /// تقدّم قراءة العنصر الحالي (0..1)، و -1 = أَشِّر العنصر كله (مثل وقت التهجئة).
-  final _prog = ValueNotifier<double>(0);
-  final Map<Item, _Words> _wr = {};
   Timer? _poll;
   bool _checking = false;
   DateTime _lastCheck = DateTime.fromMillisecondsSinceEpoch(0);
@@ -105,7 +102,6 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
       final i = id == null ? -1 : pages.indexWhere((p) => p.id == id);
       cur = i < 0 ? 0 : i;
     });
-    _wr.clear();
     _audio.setEmbedded(d.audio);
     _prefetch();
   }
@@ -141,70 +137,6 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
   // ---------- القراءة ----------
   List<Act> _acts(BookPage p) => p.acts.where((a) => a.layer == 'both' || (a.layer == 'word') == _word).toList();
 
-  // ---------- تأشير كلمة كلمة ----------
-  static double _wt(String t) {
-    final n = RegExp(r'[\u0621-\u064A\u0660-\u0669\u06F0-\u06F9A-Za-z0-9]').allMatches(t).length;
-    return (n < 1 ? 1 : n) + 0.5;
-  }
-
-  _Words _words(BookPage p, Item it) => _wr[it] ??= _calcWords(p, it);
-
-  _Words _calcWords(BookPage p, Item it) {
-    final whole = Rect.fromLTWH(it.x, it.y, it.w, it.h);
-    final toks = it.text.trim().split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
-    if (toks.length < 2) return _Words([whole], [1.0]);
-
-    // 1) مواضع الكلمات الفعلية من طبقة الكلمات إن وُجدت داخل هذا السطر.
-    final found = <Item>[];
-    for (final a in p.acts) {
-      if (a.layer != 'word') continue;
-      for (final w in a.items) {
-        final cx = w.x + w.w / 2, cy = w.y + w.h / 2;
-        if (cx >= it.x - 0.5 && cx <= it.x + it.w + 0.5 && cy >= it.y - 0.5 && cy <= it.y + it.h + 0.5) found.add(w);
-      }
-    }
-    final List<Rect> rects;
-    final List<double> wts;
-    if (found.length >= 2) {
-      // رتّب: صف بعد صف، ومن اليمين إلى اليسار داخل الصف.
-      found.sort((a, b) => (a.y + a.h / 2).compareTo(b.y + b.h / 2));
-      final rows = <List<Item>>[];
-      for (final w in found) {
-        if (rows.isNotEmpty && ((w.y + w.h / 2) - (rows.last.first.y + rows.last.first.h / 2)).abs() < 0.5 * rows.last.first.h) {
-          rows.last.add(w);
-        } else {
-          rows.add([w]);
-        }
-      }
-      final ord = <Item>[];
-      for (final r in rows) {
-        r.sort((a, b) => (b.x + b.w).compareTo(a.x + a.w));
-        ord.addAll(r);
-      }
-      rects = [for (final w in ord) Rect.fromLTWH(w.x, w.y, w.w, w.h)];
-      wts = [for (final w in ord) _wt(w.text)];
-    } else {
-      // 2) لا توجد طبقة كلمات: قسّم السطر بنسبة عدد حروف كل كلمة، من اليمين.
-      wts = [for (final t in toks) _wt(t)];
-      final sum = wts.reduce((a, b) => a + b);
-      var right = it.x + it.w;
-      rects = [];
-      for (final w in wts) {
-        final width = it.w * w / sum;
-        rects.add(Rect.fromLTWH(right - width, it.y, width, it.h));
-        right -= width;
-      }
-    }
-    final tot = wts.reduce((a, b) => a + b);
-    var acc = 0.0;
-    final ends = <double>[];
-    for (final w in wts) {
-      acc += w;
-      ends.add(acc / tot);
-    }
-    return _Words(rects, ends);
-  }
-
   void _stop() {
     _token++;
     _audio.stop();
@@ -216,11 +148,8 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
     final my = _token;
     for (final it in list) {
       if (my != _token) return;
-      _prog.value = _spell ? -1 : 0;
       _playing.value = it;
-      await _audio.speak(it, slow: _slow, spell: _spell, onProgress: (f) {
-        if (my == _token && !_spell) _prog.value = f;
-      });
+      await _audio.speak(it, slow: _slow, spell: _spell);
       if (my != _token) return;
       if (_audio.lastError != null) _msg('⚠️ ${_audio.lastError}');
       await Future.delayed(const Duration(milliseconds: 250));
@@ -406,23 +335,19 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
                 height: h,
                 child: Stack(children: [
                   Positioned.fill(child: Image.asset('assets/pages/${p.img}.jpg', fit: BoxFit.fill, gaplessPlayback: true)),
-                  // التأشير: كلمة كلمة بلون خفيف بلا إطار.
+                  // التأشير: يظلّل النص الذي سيُقرأ بلون خفيف بلا إطار.
                   Positioned.fill(
                     child: IgnorePointer(
-                      child: AnimatedBuilder(
-                        animation: Listenable.merge([_playing, _prog]),
-                        builder: (c, _) {
-                          final now = _playing.value;
+                      child: ValueListenableBuilder<Item?>(
+                        valueListenable: _playing,
+                        builder: (c, now, _) {
                           if (now == null || !items.any((i) => identical(i, now))) return const SizedBox.shrink();
-                          final ws = _words(p, now);
-                          final f = _prog.value;
-                          final r = (f < 0 || ws.r.length == 1) ? Rect.fromLTWH(now.x, now.y, now.w, now.h) : ws.r[ws.at(f)];
                           return Stack(children: [
                             Positioned(
-                              left: r.left / 100 * w,
-                              top: r.top / 100 * h,
-                              width: r.width / 100 * w,
-                              height: r.height / 100 * h,
+                              left: now.x / 100 * w,
+                              top: now.y / 100 * h,
+                              width: now.w / 100 * w,
+                              height: now.h / 100 * h,
                               child: DecoratedBox(
                                 decoration: BoxDecoration(color: Colors.amber.withOpacity(0.45), borderRadius: BorderRadius.circular(6)),
                               ),
@@ -708,18 +633,6 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
         ]);
       }),
     );
-  }
-}
-
-class _Words {
-  final List<Rect> r; // مستطيل كل كلمة بترتيب القراءة (يمين ← يسار)
-  final List<double> end; // نهاية حصة كل كلمة من زمن الصوت (تراكمي 0..1)
-  _Words(this.r, this.end);
-  int at(double f) {
-    for (var i = 0; i < end.length; i++) {
-      if (f < end[i]) return i;
-    }
-    return end.length - 1;
   }
 }
 

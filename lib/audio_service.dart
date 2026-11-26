@@ -29,20 +29,11 @@ class AudioService {
 
   /// سرعة تشغيل التسجيلات عند ضغط زر 🐢 (1.0 = عادي).
   static const double kSlowRate = 0.65;
-
-  // تقدّم النطق الآلي (0..1) لتأشير الكلمات.
-  void Function(double)? _ttsProg;
-  int _ttsLen = 0;
   Completer<void>? _cur; // ينهي انتظار التشغيل فور الإيقاف
 
   Future<void> init() async {
     _tts.setLanguage('ar-SA');
     _tts.awaitSpeakCompletion(true);
-    try {
-      _tts.setProgressHandler((String text, int start, int end, String word) {
-        if (_ttsLen > 0) _ttsProg?.call((end / _ttsLen).clamp(0.0, 1.0));
-      });
-    } catch (_) {}
     try {
       final m = await AssetManifest.loadFromAssetBundle(rootBundle);
       _bundled = m.listAssets().where((a) => a.startsWith('assets/audio/')).toSet();
@@ -67,7 +58,6 @@ class AudioService {
 
   Future<void> stop() async {
     _gen++;
-    _ttsProg = null;
     if (_cur != null && !_cur!.isCompleted) _cur!.complete();
     await _tts.stop();
     await _ap.stop();
@@ -78,11 +68,10 @@ class AudioService {
     _tts.speak(t);
   }
 
-  /// [onProgress] تُستدعى بنسبة التقدّم (0..1) أثناء القراءة لتأشير الكلمة الحالية.
-  Future<void> speak(Item it, {bool slow = false, bool spell = false, void Function(double)? onProgress}) async {
+  Future<void> speak(Item it, {bool slow = false, bool spell = false}) async {
     final g = _gen;
     lastError = null;
-    if (await _playRecorded(it.audio, slow, onProgress)) return;
+    if (await _playRecorded(it.audio, slow)) return;
     if (g != _gen) return;
     await _tts.setSpeechRate(slow ? 0.3 : 0.5);
     if (spell) {
@@ -93,12 +82,7 @@ class AudioService {
     }
     if (g != _gen) return;
     final t = it.draft ? it.text.replaceAll(RegExp(r'[\u064B-\u065F\u0670\u0640]'), '') : it.text;
-    if (t.trim().isNotEmpty) {
-      _ttsLen = t.length;
-      _ttsProg = spell ? null : onProgress;
-      await _tts.speak(t);
-      _ttsProg = null;
-    }
+    if (t.trim().isNotEmpty) await _tts.speak(t);
   }
 
   Future<File?> _file(String k) async {
@@ -107,7 +91,7 @@ class AudioService {
     return File('${_dir!.path}/$k.mp3');
   }
 
-  Future<bool> _playRecorded(String? k, bool slow, void Function(double)? onProgress) async {
+  Future<bool> _playRecorded(String? k, bool slow) async {
     if (k == null || k.isEmpty) return false;
     try {
       Source? src;
@@ -138,15 +122,7 @@ class AudioService {
         return false;
       }
       await _ap.stop();
-      Duration total = Duration.zero;
-      final subs = <StreamSubscription>[
-        _ap.onDurationChanged.listen((d) => total = d),
-        _ap.onPositionChanged.listen((p) {
-          if (onProgress != null && total.inMilliseconds > 0) {
-            onProgress((p.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0));
-          }
-        }),
-      ];
+      final subs = <StreamSubscription>[];
       try {
         final c = Completer<void>();
         _cur = c;
