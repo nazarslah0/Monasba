@@ -26,13 +26,21 @@ class Act {
   }
 }
 
+/// زر سماعة قابل للتحديد من لوحة التحكم: موضعه (نسبة مئوية من الصفحة) ومن أي رقم صوت إلى أي رقم يقرأ.
+class Player {
+  final double x, y;
+  final int from, to;
+  Player(this.x, this.y, this.from, this.to);
+}
+
 class BookPage {
   final String id, img;
   final int num;
   final double ratio;
   final List<Act> acts;
   final List<Rect> targets;
-  BookPage(this.id, this.img, this.num, this.ratio, this.acts, this.targets);
+  final List<Player> players;
+  BookPage(this.id, this.img, this.num, this.ratio, this.acts, this.targets, this.players);
 }
 
 class Stroke {
@@ -67,7 +75,11 @@ BookData parseBook(dynamic j, Map<String, dynamic> ratios, Map<String, dynamic> 
       for (final t in ((p['targets'] ?? tgs[p['id']]) as List? ?? []))
         Rect.fromLTWH((t['x'] as num).toDouble(), (t['y'] as num).toDouble(), (t['w'] as num).toDouble(), (t['h'] as num).toDouble())
     ];
-    pages.add(BookPage(p['id'].toString(), p['img'].toString(), p['num'] as int, ratio, acts, tg));
+    final pls = <Player>[
+      for (final m in ((p['players'] as List?) ?? []))
+        Player((m['x'] as num).toDouble(), (m['y'] as num).toDouble(), (m['from'] as num).toInt(), (m['to'] as num).toInt())
+    ];
+    pages.add(BookPage(p['id'].toString(), p['img'].toString(), p['num'] as int, ratio, acts, tg, pls));
   }
   return BookData(pages, aud);
 }
