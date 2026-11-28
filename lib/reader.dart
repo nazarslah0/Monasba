@@ -23,6 +23,8 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
   late final AnimationController _ctrl;
   late SharedPreferences _prefs;
   final _playing = ValueNotifier<Item?>(null);
+  /// مصدر القراءة الجارية ('page' أو نشاط أو زر تشغيل) ليتحول زره من ▶ إلى ⏹.
+  final _src = ValueNotifier<Object?>(null);
   Timer? _poll;
   bool _checking = false;
   DateTime _lastCheck = DateTime.fromMillisecondsSinceEpoch(0);
@@ -141,10 +143,12 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
     _token++;
     _audio.stop();
     _playing.value = null;
+    _src.value = null;
   }
 
-  Future<void> _run(List<Item> list) async {
+  Future<void> _run(List<Item> list, {Object? src}) async {
     _stop();
+    _src.value = src;
     final my = _token;
     for (final it in list) {
       if (my != _token) return;
@@ -153,7 +157,10 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
       if (my != _token) return;
       await Future.delayed(const Duration(milliseconds: 250));
     }
-    if (my == _token) _playing.value = null;
+    if (my == _token) {
+      _playing.value = null;
+      _src.value = null;
+    }
   }
 
   void _playOne(Item it) {
@@ -163,21 +170,21 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
 
   void _readPage() {
     _last = _readPage;
-    _run(_acts(pages[cur]).expand((a) => a.items).toList());
+    _run(_acts(pages[cur]).expand((a) => a.items).toList(), src: 'page');
   }
 
   void _readAct(Act a) {
     _last = () => _readAct(a);
-    _run(a.items);
+    _run(a.items, src: a);
   }
 
-  /// يقرأ الأصوات من رقم (from) إلى رقم (to) بترقيم الصفحة المتسلسل (كل أسطر وكلمات الصفحة).
+  /// يقرأ الأسطر من رقم (from) إلى رقم (to). الترقيم هو نفسه في لوحة التحكم: الأسطر فقط (بدون طبقة الكلمات).
   void _readRange(BookPage p, Player pl) {
     _last = () => _readRange(p, pl);
-    final all = p.acts.expand((a) => a.items).toList();
+    final all = p.acts.where((a) => a.layer != 'word').expand((a) => a.items).toList();
     final s = (pl.from - 1).clamp(0, all.length);
     final e = pl.to.clamp(s, all.length);
-    _run(all.sublist(s, e));
+    _run(all.sublist(s, e), src: pl);
   }
 
   void _goTo(int i) {
@@ -401,27 +408,27 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
     );
   }
 
-  Widget _actBtn(Act a) => Material(
-        color: kAccent,
-        shape: const CircleBorder(),
-        elevation: 4,
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: () => _readAct(a),
-          child: const SizedBox(width: 40, height: 40, child: Icon(Icons.headphones, color: Colors.white, size: 24)),
-        ),
+  /// زر دائري: ▶ للتشغيل، وأثناء التشغيل يتحول إلى ⏹ والضغط عليه يوقف الصوت.
+  Widget _roundPlay(Object key, VoidCallback start) => ValueListenableBuilder<Object?>(
+        valueListenable: _src,
+        builder: (c, now, _) {
+          final on = now == key;
+          return Material(
+            color: on ? const Color(0xFFD32F2F) : kAccent,
+            shape: const CircleBorder(),
+            elevation: 4,
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: on ? _stop : start,
+              child: SizedBox(width: 40, height: 40, child: Icon(on ? Icons.stop_rounded : Icons.play_arrow_rounded, color: Colors.white, size: 28)),
+            ),
+          );
+        },
       );
 
-  Widget _playerBtn(BookPage p, Player pl) => Material(
-        color: kAccent,
-        shape: const CircleBorder(),
-        elevation: 4,
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: () => _readRange(p, pl),
-          child: const SizedBox(width: 40, height: 40, child: Icon(Icons.headphones, color: Colors.white, size: 24)),
-        ),
-      );
+  Widget _actBtn(Act a) => _roundPlay(a, () => _readAct(a));
+
+  Widget _playerBtn(BookPage p, Player pl) => _roundPlay(pl, () => _readRange(p, pl));
 
   // ---------- الأزرار ----------
   Widget _btn(String ic, String t, VoidCallback f, {bool on = false, bool primary = false}) => Padding(
@@ -478,7 +485,13 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                _btn('🎧', 'اقرأ الصفحة', _readPage, primary: true),
+                ValueListenableBuilder<Object?>(
+                  valueListenable: _src,
+                  builder: (c, now, _) {
+                    final on = now == 'page';
+                    return _btn(on ? '⏹️' : '▶️', on ? 'إيقاف' : 'اقرأ الصفحة', on ? _stop : _readPage, primary: true);
+                  },
+                ),
                 _btn('🐢', 'بطيء', () => setState(() => _slow = !_slow), on: _slow),
                 _btn('✏️', 'رسم', () {
                   _stop();
