@@ -151,7 +151,6 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
       _playing.value = it;
       await _audio.speak(it, slow: _slow, spell: _spell);
       if (my != _token) return;
-      if (_audio.lastError != null) _msg('⚠️ ${_audio.lastError}');
       await Future.delayed(const Duration(milliseconds: 250));
     }
     if (my == _token) _playing.value = null;
@@ -172,6 +171,15 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
     _run(a.items);
   }
 
+  /// يقرأ الأصوات من رقم (from) إلى رقم (to) بترقيم الصفحة المتسلسل (كل أسطر وكلمات الصفحة).
+  void _readRange(BookPage p, Player pl) {
+    _last = () => _readRange(p, pl);
+    final all = p.acts.expand((a) => a.items).toList();
+    final s = (pl.from - 1).clamp(0, all.length);
+    final e = pl.to.clamp(s, all.length);
+    _run(all.sublist(s, e));
+  }
+
   void _goTo(int i) {
     _stop();
     setState(() => cur = i.clamp(0, pages.length - 1));
@@ -181,7 +189,7 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
 
   void _msg(String t) {
     setState(() => _toast = t);
-    Future.delayed(Duration(milliseconds: 1500 + t.length * 40), () {
+    Future.delayed(const Duration(milliseconds: 1500), () {
       if (mounted && _toast == t) setState(() => _toast = null);
     });
   }
@@ -335,50 +343,45 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
                 height: h,
                 child: Stack(children: [
                   Positioned.fill(child: Image.asset('assets/pages/${p.img}.jpg', fit: BoxFit.fill, gaplessPlayback: true)),
-                  // التأشير: يظلّل النص الذي سيُقرأ بلون خفيف بلا إطار.
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: ValueListenableBuilder<Item?>(
-                        valueListenable: _playing,
-                        builder: (c, now, _) {
-                          if (now == null || !items.any((i) => identical(i, now))) return const SizedBox.shrink();
-                          return Stack(children: [
-                            Positioned(
-                              left: now.x / 100 * w,
-                              top: now.y / 100 * h,
-                              width: now.w / 100 * w,
-                              height: now.h / 100 * h,
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(color: Colors.amber.withOpacity(0.45), borderRadius: BorderRadius.circular(6)),
-                              ),
-                            ),
-                          ]);
-                        },
-                      ),
-                    ),
-                  ),
                   for (final it in items)
                     Positioned(
                       left: it.x / 100 * w,
                       top: it.y / 100 * h,
                       width: it.w / 100 * w,
                       height: it.h / 100 * h,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => _playOne(it),
-                        child: const SizedBox.expand(),
+                      child: ValueListenableBuilder<Item?>(
+                        valueListenable: _playing,
+                        builder: (c, now, _) => GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => _playOne(it),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: identical(now, it) ? Colors.amber.withOpacity(0.45) : Colors.transparent,
+                              border: identical(now, it) ? Border.all(color: const Color(0xFFE0439B), width: 3) : null,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   Positioned.fill(
                       child: IgnorePointer(child: CustomPaint(painter: InkPainter([...(_ink[p.id] ?? []), if (live && _live != null) _live!])))),
                   if (live && _ui && !_draw)
-                    for (final a in acts)
-                      if (a.items.length >= 2)
+                    if (p.players.isNotEmpty)
+                      for (final pl in p.players)
                         Positioned(
-                          left: math.max(2.0, math.min(w - 46.0, a.box.left / 100 * w)),
-                          top: math.max(2.0, math.min(h - 46.0, a.box.top / 100 * h - 22)),
-                          child: _actBtn(a),
-                        ),
+                          left: math.max(2.0, math.min(w - 42.0, pl.x / 100 * w - 20)),
+                          top: math.max(2.0, math.min(h - 42.0, pl.y / 100 * h - 20)),
+                          child: _playerBtn(p, pl),
+                        )
+                    else
+                      for (final a in acts)
+                        if (a.items.length >= 2)
+                          Positioned(
+                            left: math.max(2.0, math.min(w - 46.0, a.box.left / 100 * w)),
+                            top: math.max(2.0, math.min(h - 46.0, a.box.top / 100 * h - 22)),
+                            child: _actBtn(a),
+                          ),
                   if (live && _draw)
                     Positioned.fill(
                       child: GestureDetector(
@@ -405,6 +408,17 @@ class _ReaderState extends State<ReaderScreen> with SingleTickerProviderStateMix
         child: InkWell(
           customBorder: const CircleBorder(),
           onTap: () => _readAct(a),
+          child: const SizedBox(width: 40, height: 40, child: Icon(Icons.headphones, color: Colors.white, size: 24)),
+        ),
+      );
+
+  Widget _playerBtn(BookPage p, Player pl) => Material(
+        color: kAccent,
+        shape: const CircleBorder(),
+        elevation: 4,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () => _readRange(p, pl),
           child: const SizedBox(width: 40, height: 40, child: Icon(Icons.headphones, color: Colors.white, size: 24)),
         ),
       );
